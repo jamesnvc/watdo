@@ -15,7 +15,7 @@
 
 <template name="debug_info">
   <pre class="span3">
-    {{cursorStart}}, {{cursorEnd}}
+    Cursor at {{cursorStart}}, {{cursorEnd}}
   </pre>
 </template>
 
@@ -31,7 +31,5 @@
 </template>
 
 <template name="activity_info">
-  <div class="parsed" data-id="{{_id}}" contenteditable="true">
-    {{rawString}}
-  </div>
+  <div class="{{type}}" data-id="{{_id}}" data-order="{{display_order}}" contenteditable="true">{{rawString}}</div>
 </template>

@@ -17,7 +17,21 @@ getCursorPosition = () ->
     {start: range.startOffset, end: range.endOffset}
 
 trim = (str) ->
-  str.replace(/^\s*/, '').replace(/\s*$/, '')
+  str.replace(/^\s*/, '').replace(/\s+$/, ' ')
+
+typeRegexes =
+  "^[0-9]{4}$": 'year'
+  "^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-zA-Z]+$": 'month'
+  "^[0-9]{2}$": 'day'
+  "^([0-9\.]+)([a-zA-Z]*) ([a-zA-Z -]+)$": 'food'
+  "^([0-9]+)x([0-9]+)x([0-9]+) ([a-zA-Z]+)$": 'exercise'
+  "^([0-9]+)(lb|kg)$": 'bodymass'
+
+determineActivityType = (activity) ->
+  for own regex, type of typeRegexes
+    if activity.rawString.match(new RegExp(regex, 'i'))
+      return type
+      break
 
 if Meteor.is_client
 
@@ -39,33 +53,38 @@ if Meteor.is_client
 
   updateEditTimeout = null
   modDown = false
+  ignoreUp = 0
   Template.activity_info.events
     'focus': (ev) ->
-      console.log 'focus'
       Session.set 'focused', this._id
       cursor = getCursorPosition()
       if cursor?
         Session.set 'cursorAt', cursor
     'blur': (ev) ->
-      console.log 'blur'
       Session.set 'focused', ''
     'keydown': (ev) ->
       node = ev.target
       if ev.which in [ENTER_KEY, ARROW_UP, ARROW_DOWN]
         ev.preventDefault()
-      if ev.which in [CMD_KEY, SHIFT_KEY, CTRL_KEY, OPT_KEY]
+      else if ev.which in [CMD_KEY, SHIFT_KEY, CTRL_KEY, OPT_KEY]
         modDown = true
+      else if modDown
+        ignoreUp = ignoreUp + 1
     'keyup': (ev) ->
-      console.log ev.which
-      console.log 'meta, alt, ctrl', ev.metaKey, ev.altKey, ev.ctrlKey
       node = ev.target
       if ev.which == ENTER_KEY
-        new_display_order = this.display_order + 1
-        if ev.shiftKey
+        # TODO: What's going on here? below not inc'd?
+        if ev.shiftKey # Insert above
           new_display_order = this.display_order
-        Activities.update {display_order: {$gte: new_display_order}}, {$inc: {display_order: 1}}
-        newId = Activities.insert rawString: ' ', display_order: new_display_order
+          Activities.update {display_order: {$gte: new_display_order}},
+            {$inc: {display_order: 1}}
+        else # Insert below
+          new_display_order = this.display_order + 1
+          Activities.update {display_order: {$gte: new_display_order}},
+            {$inc: {display_order: 1}}
+        newId = Activities.insert rawString: '', display_order: new_display_order
         Session.set 'focused', newId
+        Session.set 'cursorAt', -1
       else if ev.which in [ARROW_LEFT, ARROW_RIGHT]
         Session.set 'cursorAt', getCursorPosition()
       else if ev.which == ARROW_UP
@@ -75,23 +94,34 @@ if Meteor.is_client
       else if ev.which in [CMD_KEY, SHIFT_KEY, CTRL_KEY, OPT_KEY]
         Session.set 'cursorAt', getCursorPosition()
         modDown = false
+      else if ignoreUp > 0
+        ignoreUp = ignoreUp - 1
       else if not modDown
         if ev.which == BACKSPACE_KEY and this.rawString.length == 0
-          Activities.update {display_order: {$gt: this.display_order}}, {$inc: {display_order: -1}}
+          Activities.update {display_order: {$gt: this.display_order}},
+            {$inc: {display_order: -1}}
           Activities.remove this._id
+          Session.set 'cursorAt', -1
           $(node).prev().focus()
         else
           Session.set 'cursorAt', getCursorPosition()
-          Activities.update this._id, $set: {rawString: trim($(node).text())}
+          Activities.update this._id, $set:
+            rawString: trim($(node).text())
+            type: determineActivityType(this)
 
   Template.activity_info.rendered = ->
     if this.data._id == Session.get 'focused'
       $(this.firstNode).focus()
-      cursor = Session.get 'cursorAt'
       range = document.createRange()
-      range.setStart this.firstNode.firstChild, cursor.start
-      range.setEnd this.firstNode.firstChild, cursor.end
-      range.collapse true
+      cursor = Session.get 'cursorAt'
+      if cursor >= 0
+        range.setStart this.firstNode.firstChild, cursor.start
+        range.setEnd this.firstNode.firstChild, cursor.end
+      else
+        if not this.firstNode.firstChild
+          this.firstNode.appendChild document.createTextNode('')
+        range.selectNodeContents this.firstNode.firstChild
+      range.collapse false
       sel = window.getSelection()
       sel.removeAllRanges()
       sel.addRange range
